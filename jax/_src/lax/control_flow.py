@@ -369,9 +369,7 @@ def _pred_bcast_select(c, pred, x, y, x_y_aval: core.AbstractValue):
   x_shape = c.get_shape(x).dimensions()
   y_shape = c.get_shape(y).dimensions()
   assert x_shape == y_shape
-  if x_y_aval is core.abstract_unit:
-    return x
-  elif x_y_aval is core.abstract_token:
+  if x_y_aval is core.abstract_token:
     return xops.AfterAll(c, [x, y])
   else:
     assert pred_shape == x_shape[:len(pred_shape)] == y_shape[:len(pred_shape)], (pred_shape, x_shape, y_shape)
@@ -542,6 +540,7 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
       carry_uk = _map(operator.or_, carry_uk, carry_out_uk)
   else:
     assert False, "Fixpoint not reached"
+  all_uk = cond_consts_uk + body_consts_uk + carry_uk
 
   cond_jaxpr_known, _, cond_uk = pe.partial_eval_jaxpr(  # type: ignore
       cond_jaxpr, cond_consts_uk + carry_uk, instantiate=False)
@@ -551,11 +550,9 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
     # just do the default processing.
     return trace.default_process_primitive(while_p, tracers, params)
 
-  # Run the known part of the while. Prepare the inputs, as constants (if known), or
-  # as core.unit.
-  in_consts = [ core.unit if uk else t.pval.get_known()
-                for uk, t in zip(cond_consts_uk + body_consts_uk + carry_uk,
-                                 tracers)]
+  # Run the known part of the while. Prepare the inputs as constants (if known)
+
+  in_consts = [t.pval.get_known() for uk, t in zip(all_uk, tracers) if not uk]
   # There should be no residuals for the cond_jaxpr_known
   assert 1 == len(cond_jaxpr_known.out_avals)
   # We ignore the residuals from the body_jaxpr_known, so the type of inputs matches
@@ -838,11 +835,9 @@ def _cond_batching_rule(axis_size, axis_name, main_type, args, dims, branches, l
       # Perform a select on the inputs for safety of reverse-mode autodiff; see
       # https://github.com/google/jax/issues/1052
       ops_ = [_bcast_select(lax.eq(index, lax._const(index, i)),
-                            x, lax.stop_gradient(x))
-              if x is not core.unit else x for x in ops]
+                            x, lax.stop_gradient(x)) for x in ops]
       branch_outs.append(core.jaxpr_as_fun(jaxpr)(*ops_))
-    out = [_select_tree(index, outs) if outs[0] is not core.unit else outs[0]
-           for outs in zip(*branch_outs)]
+    out = [_select_tree(index, outs) for outs in zip(*branch_outs)]
     return out, [0] * len(branch_outs[0])
   else:
     ops_bat = [d is not batching.not_mapped for d in op_dims]
@@ -908,10 +903,10 @@ def _cond_partial_eval(trace, *tracers, branches, linear):
   for branch_jaxpr in branches:
     branch_jaxpr_1, branch_jaxpr_2, _ = pe.partial_eval_jaxpr(
         branch_jaxpr, ops_uk, instantiate=out_uks)
-    branch_num_res = len(branch_jaxpr_1.out_avals) - len(out_uks)
+    branch_num_res = len(branch_jaxpr_1.out_avals) - (len(out_uks) - sum(out_uks))
 
     # move residuals to the front
-    move = [False] * len(ops_uk) + [True] * branch_num_res
+    move = [False] * sum(ops_uk) + [True] * branch_num_res
     branch_jaxpr_2 = pe.move_binders_to_front(branch_jaxpr_2, move)
 
     # TODO(frostig,mattjj): pe.partial_eval_jaxpr should raise to shaped avals
@@ -944,25 +939,26 @@ def _cond_partial_eval(trace, *tracers, branches, linear):
   #   assert j.out_avals == branches_1[0].out_avals
   num_res = len(all_res_avals)
 
-  _, in_consts = unzip2([t.pval for t in tracers])
-  out_consts_res = cond_p.bind(*in_consts, branches=branches_1, linear=linear)
+  _, in_consts_ = unzip2([t.pval for t in tracers])
+  in_consts = [c for c in in_consts_ if c is not None]
+  linear_ = tuple([l for l, uk in zip(linear, ops_uk) if not uk])
+  out_consts_res = cond_p.bind(*in_consts, branches=branches_1, linear=linear_)
   out_consts, res = split_list(out_consts_res, [len(out_consts_res) - num_res])
 
   # TODO(frostig,mattjj): remove raised_to_shaped of avals once
   # pe.partial_eval_jaxpr handles it
-  out_avals = _map(raise_to_shaped, branches_2[0].out_avals)
-  out_pvs = [aval if uk else None for aval, uk in zip(out_avals, out_uks)]
+  out_avals = iter(_map(raise_to_shaped, branches_2[0].out_avals))
+  out_pvs = [next(out_avals) if uk else None for uk in out_uks]
+  breakpoint()  # TODO out_tracers_unknown etc
+  out_consts_ = iter(out_consts)
+  out_pvals = [pe.PartialVal((pv, next(out_consts_))) if pv is None
+               else pe.PartialVal((pv, None)) for pv in out_pvs]
 
   index_tracer = trace.instantiate_const(tracers[0])
 
-  ops_tracers = [trace.instantiate_const(t) if uk
-                 else trace.new_instantiated_literal(core.unit)
-                 for uk, t in zip(unknowns[1:], tracers[1:])]
-
+  ops_tracers = [trace.instantiate_const(t) for uk, t in zip(unknowns[1:], tracers[1:]) if uk]
   res_tracers = _map(trace.new_instantiated_const, res)
-
-  out_tracers = [pe.JaxprTracer(trace, pe.PartialVal((pv, const)), None)
-                 for pv, const in zip(out_pvs, out_consts)]
+  out_tracers = [pe.JaxprTracer(trace, pval, None) for pval in out_pvals]
 
   linear_2 = (False,) * num_res + linear
   params = dict(branches=branches_2, linear=linear_2)
@@ -1291,9 +1287,7 @@ def scan(f: Callable[[Carry, X], Tuple[Carry, Y]],
       xs_slice = [_index_array(i, core.get_aval(x), x) for x in xs_flat]
       carry, y = f(carry, tree_unflatten(xs_tree, xs_slice))
       ys.append(y)
-    stack = lambda y, *ys: (y if core.get_aval(y) is core.abstract_unit
-                            else jax.numpy.stack((y, *ys)))
-    stacked_y = tree_multimap(stack, *maybe_reversed(ys))
+    stacked_y = tree_multimap(jax.numpy.stack, *maybe_reversed(ys))
     return carry, stacked_y
 
   x_shapes = [masking.padded_shape_as_value(x.shape[1:]) for x in xs_flat]
@@ -1456,71 +1450,41 @@ def _scan_impl(*args, reverse, length, num_consts, num_carry, jaxpr, linear,
   return (*carry, *ys)
 
 def _stack(aval, vals):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    vals = [lax.expand_dims(x, (0,)) for x in vals]
-    return lax.concatenate(vals, 0)
+  vals = [lax.expand_dims(x, (0,)) for x in vals]
+  return lax.concatenate(vals, 0)
 
 def _concatenate(aval, x1, x2):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    return lax.concatenate([x1, x2], 0)
+  return lax.concatenate([x1, x2], 0)
 
 def _split_leading_dim(i, aval, x):
-  if aval is core.abstract_unit:
-    return (core.unit, core.unit)
-  else:
-    assert x.ndim >= 1
-    return (lax.slice_in_dim(x, 0, i),
-            lax.slice_in_dim(x, i, x.shape[0]))
+  assert x.ndim >= 1
+  return (lax.slice_in_dim(x, 0, i), lax.slice_in_dim(x, i, x.shape[0]))
 
 def _dynamic_index_array(i, aval, x):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    return lax.dynamic_index_in_dim(x, i, keepdims=False)
+  return lax.dynamic_index_in_dim(x, i, keepdims=False)
 
 def _index_array(i, aval, x):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    return lax.index_in_dim(x, i, keepdims=False)
+  return lax.index_in_dim(x, i, keepdims=False)
 
 def _empty_array(sz, aval):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    return lax.full((sz,) + aval.shape, 0, aval.dtype)
+  return lax.full((sz,) + aval.shape, 0, aval.dtype)
 
 def _update_array(i, aval, xs, x):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    return lax.dynamic_update_index_in_dim(xs, x, i, 0)
+  return lax.dynamic_update_index_in_dim(xs, x, i, 0)
 
 def _partition_leading(sz0, sz1, aval, x):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    assert x.ndim >= 1
-    assert x.shape[0] == sz0 * sz1
-    return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
+  assert x.ndim >= 1
+  assert x.shape[0] == sz0 * sz1
+  return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
 
 def _combine_leading(sz0, sz1, aval, x):
-  if aval is core.abstract_unit:
-    return core.unit
-  else:
-    assert x.ndim >= 2
-    assert x.shape[0] == sz0
-    assert x.shape[1] == sz1
-    return lax.collapse(x, 0, 2)
+  assert x.ndim >= 2
+  assert x.shape[0] == sz0
+  assert x.shape[1] == sz1
+  return lax.collapse(x, 0, 2)
 
 def _prepend_dim_to_aval(sz, aval):
-  if aval is core.abstract_unit:
-    return aval
-  elif isinstance(aval, ShapedArray):
+  if isinstance(aval, ShapedArray):
     return aval.update(shape=(sz, *aval.shape), weak_type=False)
   else:
     raise TypeError(f'Prepending dim {sz} to aval {aval}')

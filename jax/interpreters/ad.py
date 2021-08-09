@@ -104,8 +104,8 @@ def linearize(traceable, *primals, **kwargs):
   out_primals_pvals, out_tangents_pvals = tree_unflatten(out_tree(), out_pvals)
   assert all(out_primal_pval.is_known() for out_primal_pval in out_primals_pvals)
   _, out_primals_consts = unzip2(out_primals_pvals)
-  jaxpr.invars = jaxpr.invars[len(primals):]
-  jaxpr.outvars = jaxpr.outvars[len(out_primals_pvals):]
+  # jaxpr.invars = jaxpr.invars[len(primals):]
+  # jaxpr.outvars = jaxpr.outvars[len(out_primals_pvals):]
   if not has_aux:
     return out_primals_consts, out_tangents_pvals, jaxpr, consts
   else:
@@ -200,7 +200,6 @@ def backward_pass(jaxpr: core.Jaxpr, reduce_axes, consts, primals_in, cotangents
       primal_env[v] = val
 
   primal_env: Dict[Any, Any] = {}
-  write_primal(core.unitvar, core.unit)
   map(write_primal, jaxpr.constvars, consts)
   # FIXME: invars can contain both primal and tangent values, and this line
   #        forces primal_in to contain UndefinedPrimals for tangent values!
