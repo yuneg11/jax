@@ -49,6 +49,7 @@ from ._src.config import (
   default_matmul_precision as default_matmul_precision,
   numpy_rank_promotion as numpy_rank_promotion,
 )
+from .core import eval_context as ensure_compile_time_eval
 from ._src.api import (
   ad,  # TODO(phawkins): update users to avoid this.
   checkpoint as checkpoint,
