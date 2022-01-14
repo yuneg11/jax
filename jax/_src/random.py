@@ -484,12 +484,11 @@ def choice(key: KeyArray,
       p_cuml = jnp.cumsum(p)
       r = p_cuml[-1] * (1 - uniform(key, shape))
       ind = jnp.searchsorted(p_cuml, r)
-      result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
     else:
       # Gumbel top-k trick: https://timvieira.github.io/blog/post/2019/09/16/algorithms-for-sampling-without-replacement/
       g = -gumbel(key, (n_inputs,)) - jnp.log(p)
       ind = jnp.argsort(g)[:n_draws]
-      result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
+    result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
   return result.reshape(shape)
 
 
@@ -518,16 +517,15 @@ def normal(key: KeyArray,
 
 @partial(jit, static_argnums=(1, 2), inline=True)
 def _normal(key, shape, dtype) -> jnp.ndarray:
-  if dtypes.issubdtype(dtype, np.complexfloating):
-    sqrt2 = np.array(np.sqrt(2), dtype)
-
-    key_re, key_im = _split(key)
-    real_dtype = np.array(0, dtype).real.dtype
-    _re = _normal_real(key_re, shape, real_dtype)
-    _im = _normal_real(key_im, shape, real_dtype)
-    return (_re + 1j * _im) / sqrt2
-  else:
+  if not dtypes.issubdtype(dtype, np.complexfloating):
     return _normal_real(key, shape, dtype) # type: ignore
+  sqrt2 = np.array(np.sqrt(2), dtype)
+
+  key_re, key_im = _split(key)
+  real_dtype = np.array(0, dtype).real.dtype
+  _re = _normal_real(key_re, shape, real_dtype)
+  _im = _normal_real(key_im, shape, real_dtype)
+  return (_re + 1j * _im) / sqrt2
 
 @partial(jit, static_argnums=(1, 2), inline=True)
 def _normal_real(key, shape, dtype) -> jnp.ndarray:
@@ -578,10 +576,10 @@ def multivariate_normal(key: KeyArray,
 
 @partial(jit, static_argnums=(3, 4, 5), inline=True)
 def _multivariate_normal(key, mean, cov, shape, dtype, method) -> jnp.ndarray:
-  if not np.ndim(mean) >= 1:
+  if np.ndim(mean) < 1:
     msg = "multivariate_normal requires mean.ndim >= 1, got mean.ndim == {}"
     raise ValueError(msg.format(np.ndim(mean)))
-  if not np.ndim(cov) >= 2:
+  if np.ndim(cov) < 2:
     msg = "multivariate_normal requires cov.ndim >= 2, got cov.ndim == {}"
     raise ValueError(msg.format(np.ndim(cov)))
   n = mean.shape[-1]
@@ -816,7 +814,7 @@ def dirichlet(key: KeyArray,
 
 @partial(jit, static_argnums=(2, 3), inline=True)
 def _dirichlet(key, alpha, shape, dtype):
-  if not np.ndim(alpha) >= 1:
+  if np.ndim(alpha) < 1:
     msg = "dirichlet requires alpha.ndim >= 1, got alpha.ndim == {}"
     raise ValueError(msg.format(np.ndim(alpha)))
 
@@ -886,14 +884,16 @@ def _gamma_one(key: KeyArray, alpha):
 
   def _cond_fn(kXVU):
     _, X, V, U = kXVU
-    # TODO: use lax.cond when its batching rule is supported
-    # The reason is to avoid evaluating second condition which involves log+log
-    # if the first condition is satisfied
-    cond = lax.bitwise_and(lax.ge(U, lax.sub(one, lax.mul(squeeze_const, lax.mul(X, X)))),
-                           lax.ge(lax.log(U), lax.add(lax.mul(X, one_over_two),
-                                                      lax.mul(d, lax.add(lax.sub(one, V),
-                                                                         lax.log(V))))))
-    return cond
+    return lax.bitwise_and(
+        lax.ge(U, lax.sub(one, lax.mul(squeeze_const, lax.mul(X, X)))),
+        lax.ge(
+            lax.log(U),
+            lax.add(
+                lax.mul(X, one_over_two),
+                lax.mul(d, lax.add(lax.sub(one, V), lax.log(V))),
+            ),
+        ),
+    )
 
   def _body_fn(kXVU):
     def _next_kxv(kxv):

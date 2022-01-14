@@ -137,10 +137,9 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
       out = lax.add(lax.log(lax.abs(sumexp)), amax)
   if return_sign:
     return (out, sign)
-  if b is not None:
-    if not np.issubdtype(out.dtype, np.complexfloating):
-      with jax.debug_nans(False):
-        out = jnp.where(sign < 0, jnp.array(np.nan, dtype=out.dtype), out)
+  if b is not None and not np.issubdtype(out.dtype, np.complexfloating):
+    with jax.debug_nans(False):
+      out = jnp.where(sign < 0, jnp.array(np.nan, dtype=out.dtype), out)
   return out
 
 
@@ -754,24 +753,22 @@ def _gen_derivatives(p: jnp.ndarray,
   # p_{l-1}^{m-2}.
   p_mm2_lm1 = jnp.pad(p_m_lm1, ((2, 0), (0, 0), (0, 0)))[:num_m, :, :]
 
-  # Derivative computation requires negative orders.
   if is_normalized:
     raise NotImplementedError(
         'Negative orders for normalization is not implemented yet.')
-  else:
-    if num_l > 1:
-      l_vec = jnp.arange(1, num_l - 1)
-      p_p1 = p[1, 1:num_l - 1, :]
-      coeff = -1.0 / ((l_vec + 1) * l_vec)
-      update_p_p1 = jnp.einsum('i,ij->ij', coeff, p_p1)
-      p_mm2_lm1 = p_mm2_lm1.at[1, 2:num_l, :].set(update_p_p1)
+  if num_l > 1:
+    l_vec = jnp.arange(1, num_l - 1)
+    p_p1 = p[1, 1:num_l - 1, :]
+    coeff = -1.0 / ((l_vec + 1) * l_vec)
+    update_p_p1 = jnp.einsum('i,ij->ij', coeff, p_p1)
+    p_mm2_lm1 = p_mm2_lm1.at[1, 2:num_l, :].set(update_p_p1)
 
-    if num_l > 2:
-      l_vec = jnp.arange(2, num_l - 1)
-      p_p2 = p[2, 2:num_l - 1, :]
-      coeff = 1.0 / ((l_vec + 2) * (l_vec + 1) * l_vec)
-      update_p_p2 = jnp.einsum('i,ij->ij', coeff, p_p2)
-      p_mm2_lm1 = p_mm2_lm1.at[0, 3:num_l, :].set(update_p_p2)
+  if num_l > 2:
+    l_vec = jnp.arange(2, num_l - 1)
+    p_p2 = p[2, 2:num_l - 1, :]
+    coeff = 1.0 / ((l_vec + 2) * (l_vec + 1) * l_vec)
+    update_p_p2 = jnp.einsum('i,ij->ij', coeff, p_p2)
+    p_mm2_lm1 = p_mm2_lm1.at[0, 3:num_l, :].set(update_p_p2)
 
   m_mat, l_mat = jnp.mgrid[:num_m, :num_l]
 
@@ -1303,8 +1300,7 @@ def _expi_pos(x):
 @jit
 def expi(x):
   (x,) = _promote_args_inexact("expi", x)
-  ret = jnp.piecewise(x, [x < 0], [lambda x: -exp1(-x), _expi_pos])
-  return ret
+  return jnp.piecewise(x, [x < 0], [lambda x: -exp1(-x), _expi_pos])
 
 
 @expi.defjvp
@@ -1444,8 +1440,7 @@ def expn(n, x):
     partial(_expn2, n),
     partial(_expn1, n),
   ]
-  ret = jnp.piecewise(x, conds, vals)
-  return ret
+  return jnp.piecewise(x, conds, vals)
 
 
 @expn.defjvp

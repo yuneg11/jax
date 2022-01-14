@@ -443,7 +443,7 @@ def _while_loop_batching_rule(axis_size, axis_name, main_type, args, dims,
   for x, old_axis, new_axis in zip(init, init_dims, carry_dims):
     if old_axis is batching.not_mapped and new_axis is not batching.not_mapped:
       new_init.append(batching.broadcast(x, axis_size, new_axis))
-    elif old_axis is batching.not_mapped and new_axis is batching.not_mapped:
+    elif old_axis is batching.not_mapped:
       new_init.append(x)
     else:
       assert new_axis is not batching.not_mapped
@@ -546,7 +546,7 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
   cond_jaxpr_known, _, cond_uk = pe.partial_eval_jaxpr(  # type: ignore
       cond_jaxpr, cond_consts_uk + carry_uk, instantiate=False)
 
-  if cond_uk[0] or all([not uk for uk in unknowns]) or all(unknowns):
+  if cond_uk[0] or not any(unknowns) or all(unknowns):
     # If conditional is unknown, or all inputs are known, or all are unknown,
     # just do the default processing.
     return trace.default_process_primitive(while_p, tracers, params)
@@ -572,12 +572,10 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
 
   # Run the whole while_loop to get all the outputs, then merge with known ones
   out_all: Sequence[pe.Tracer] = trace.default_process_primitive(while_p, tracers, params)
-  out_tracers: Sequence[pe.Tracer] = [
+  return [
     out_unknown if uk
     else pe.JaxprTracer(trace, pe.PartialVal.known(known), out_unknown.recipe)
     for uk, out_unknown, known in zip(carry_uk, out_all, out_known)]
-
-  return out_tracers
 
 def _while_transpose_error(*_, **kwargs):
   raise ValueError("Reverse-mode differentiation does not work for "
@@ -632,7 +630,7 @@ def switch(index, branches: Sequence[Callable], operand):
 
   branches = tuple(branches)
 
-  if len(branches) == 0:
+  if not branches:
     raise ValueError("Empty branch sequence")
   elif len(branches) == 1:
     return branches[0](operand)
@@ -721,11 +719,7 @@ def _cond(pred, true_fun: Callable, false_fun: Callable, operand):
       raise TypeError(msg.format(pred_dtype))
 
   if config.jax_disable_jit and isinstance(core.get_aval(pred), ConcreteArray):
-    if pred:
-      return true_fun(operand)
-    else:
-      return false_fun(operand)
-
+    return true_fun(operand) if pred else false_fun(operand)
   ops, ops_tree = tree_flatten((operand,))
   ops_avals = tuple(_map(_abstractify, ops))
 
@@ -1458,9 +1452,8 @@ def _scan_impl(*args, reverse, length, num_consts, num_carry, jaxpr, linear,
 def _stack(aval, vals):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    vals = [lax.expand_dims(x, (0,)) for x in vals]
-    return lax.concatenate(vals, 0)
+  vals = [lax.expand_dims(x, (0,)) for x in vals]
+  return lax.concatenate(vals, 0)
 
 def _concatenate(aval, x1, x2):
   if aval is core.abstract_unit:
@@ -1471,10 +1464,9 @@ def _concatenate(aval, x1, x2):
 def _split_leading_dim(i, aval, x):
   if aval is core.abstract_unit:
     return (core.unit, core.unit)
-  else:
-    assert x.ndim >= 1
-    return (lax.slice_in_dim(x, 0, i),
-            lax.slice_in_dim(x, i, x.shape[0]))
+  assert x.ndim >= 1
+  return (lax.slice_in_dim(x, 0, i),
+          lax.slice_in_dim(x, i, x.shape[0]))
 
 def _dynamic_index_array(i, aval, x):
   if aval is core.abstract_unit:
@@ -1503,19 +1495,17 @@ def _update_array(i, aval, xs, x):
 def _partition_leading(sz0, sz1, aval, x):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    assert x.ndim >= 1
-    assert x.shape[0] == sz0 * sz1
-    return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
+  assert x.ndim >= 1
+  assert x.shape[0] == sz0 * sz1
+  return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
 
 def _combine_leading(sz0, sz1, aval, x):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    assert x.ndim >= 2
-    assert x.shape[0] == sz0
-    assert x.shape[1] == sz1
-    return lax.collapse(x, 0, 2)
+  assert x.ndim >= 2
+  assert x.shape[0] == sz0
+  assert x.shape[1] == sz1
+  return lax.collapse(x, 0, 2)
 
 def _prepend_dim_to_aval(sz, aval):
   if aval is core.abstract_unit:

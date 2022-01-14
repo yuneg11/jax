@@ -56,10 +56,7 @@ def benchmark(f: Callable[[], Any], iters: Optional[int] = None,
     target_total_secs = int(os.getenv("TARGET_TOTAL_SECS", "10"))
 
   if warmup is None:
-    if iters is None:
-      warmup = 1
-    else:
-      warmup = np.clip(1, iters // 10, 10)
+    warmup = 1 if iters is None else np.clip(1, iters // 10, 10)
   for _ in range(warmup):
     f()
 
@@ -155,9 +152,7 @@ def _export_results(data_header, data, export_dir, name):
 
 
 def _param_str(param):
-  if callable(param):
-    return param.__name__
-  return str(param)
+  return param.__name__ if callable(param) else str(param)
 
 
 def _pstd(x):

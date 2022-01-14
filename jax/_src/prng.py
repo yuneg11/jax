@@ -75,9 +75,8 @@ class PRNGImpl(NamedTuple):
 def _is_prng_key_data(impl, keys: jnp.ndarray) -> bool:
   ndim = len(impl.key_shape)
   try:
-    return (keys.ndim >= 1 and
-            keys.shape[-ndim:] == impl.key_shape and
-            (keys.dtype == np.uint32 or keys.dtype == float0))
+    return (keys.ndim >= 1 and keys.shape[-ndim:] == impl.key_shape
+            and keys.dtype in [np.uint32, float0])
   except AttributeError:
     return False
 
@@ -119,25 +118,21 @@ class PRNGKeyArray:
 
   @property
   def dtype(self):
-    # TODO(frostig): remove after deprecation window
     if config.jax_enable_custom_prng:
       raise AttributeError("'PRNGKeyArray' has no attribute 'dtype'")
-    else:
-      warnings.warn(
-          'deprecated `dtype` attribute of PRNG key arrays', FutureWarning)
-      return np.uint32
+    warnings.warn(
+        'deprecated `dtype` attribute of PRNG key arrays', FutureWarning)
+    return np.uint32
 
   @property
   def shape(self):
-    # TODO(frostig): simplify once we always enable_custom_prng
     if config.jax_enable_custom_prng:
       return self._shape
-    else:
-      warnings.warn(
-          'deprecated `shape` attribute of PRNG key arrays. In a future version '
-          'of JAX this attribute will be removed or its value may change.',
-          FutureWarning)
-      return self.keys.shape
+    warnings.warn(
+        'deprecated `shape` attribute of PRNG key arrays. In a future version '
+        'of JAX this attribute will be removed or its value may change.',
+        FutureWarning)
+    return self.keys.shape
 
   @property
   def _shape(self):
@@ -512,7 +507,7 @@ def _rbg_fold_in(key: jnp.ndarray, data: int) -> jnp.ndarray:
 
 def _rbg_random_bits(key: jnp.ndarray, bit_width: int, shape: Sequence[int]
                      ) -> jnp.ndarray:
-  if not key.shape == (4,) and key.dtype == jnp.dtype('uint32'):
+  if key.shape != (4, ) and key.dtype == jnp.dtype('uint32'):
     raise TypeError("_rbg_random_bits got invalid prng key.")
   if bit_width not in (8, 16, 32, 64):
     raise TypeError("requires 8-, 16-, 32- or 64-bit field width.")

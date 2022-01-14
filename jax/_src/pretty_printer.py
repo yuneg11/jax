@@ -145,7 +145,7 @@ _BreakMode = enum.Enum("_BreakMode", ["FLAT", "BREAK"])
 
 def _fits(doc: Doc, width: int, agenda: List[Tuple[int, _BreakMode, Doc]]
          ) -> bool:
-  while width >= 0 and len(agenda) > 0:
+  while width >= 0 and agenda:
     i, m, doc = agenda.pop()
     if isinstance(doc, _NilDoc):
       pass
@@ -175,7 +175,7 @@ def _sparse(doc: Doc) -> bool:
   agenda = [doc]
   num_annotations = 0
   seen_break = False
-  while len(agenda) > 0:
+  while agenda:
     doc = agenda.pop()
     if isinstance(doc, _NilDoc):
       pass
@@ -260,7 +260,7 @@ def _format(doc: Doc, width: int, *, use_color, annotation_prefix) -> str:
   k = 0
   line_text = ""
   line_annotations = []
-  while len(agenda) > 0:
+  while agenda:
     i, m, doc, color = agenda.pop()
     if isinstance(doc, _NilDoc):
       pass
@@ -276,7 +276,7 @@ def _format(doc: Doc, width: int, *, use_color, annotation_prefix) -> str:
                     for d in reversed(doc.children))
     elif isinstance(doc, _BreakDoc):
       if m == _BreakMode.BREAK:
-        if len(line_annotations) > 0:
+        if line_annotations:
           color_state, color_str = _update_color(use_color, color_state,
                                                  annotation_colors)
           line_text += color_str
@@ -307,7 +307,7 @@ def _format(doc: Doc, width: int, *, use_color, annotation_prefix) -> str:
     else:
       raise ValueError("Invalid document ", doc)
 
-  if len(line_annotations) > 0:
+  if line_annotations:
     color_state, color_str = _update_color(use_color, color_state,
                                            annotation_colors)
     line_text += color_str
@@ -381,7 +381,7 @@ bright = partial(color, intensity=Intensity.BRIGHT)
 def join(sep: Doc, docs: Sequence[Doc]) -> Doc:
   """Concatenates `docs`, separated by `sep`."""
   docs = list(docs)
-  if len(docs) == 0:
+  if not docs:
     return nil()
   xs = [docs[0]]
   for doc in docs[1:]:

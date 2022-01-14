@@ -182,7 +182,7 @@ class Var:
 
 def _encode_digits_alphabetic(n):
   s = ''
-  while len(s) == 0 or n:
+  while not s or n:
     n, i = n // 26, n % 26
     s = chr(97 + i % 26) + s
   return s
@@ -311,11 +311,10 @@ def extract_call_jaxpr(
   """
   if not (primitive.call_primitive or primitive.map_primitive):
     return (None, params)
-  else:
-    assert "call_jaxpr" in params
-    new_params = dict(params)
-    del new_params["call_jaxpr"]
-    return (params["call_jaxpr"], new_params)
+  assert "call_jaxpr" in params
+  new_params = dict(params)
+  del new_params["call_jaxpr"]
+  return (params["call_jaxpr"], new_params)
 
 
 # TODO(mattjj): replace this approach with a primitive-keyed table of rules
@@ -349,10 +348,7 @@ def eval_jaxpr_eqn(eqn, in_vals):
 
 def eval_jaxpr(jaxpr: Jaxpr, consts, *args):
   def read(v):
-    if type(v) is Literal:
-      return v.val
-    else:
-      return env[v]
+    return v.val if type(v) is Literal else env[v]
 
   def write(v, val):
     env[v] = val
@@ -764,11 +760,10 @@ def trace_state_clean() -> bool:
 
 def reset_trace_state() -> bool:
   "Reset the global trace state and return True if it was already clean."
-  if not trace_state_clean():
-    thread_local_state.trace_state.__init__()  # type: ignore
-    return False
-  else:
+  if trace_state_clean():
     return True
+  thread_local_state.trace_state.__init__()  # type: ignore
+  return False
 
 def cur_sublevel() -> Sublevel:
   return thread_local_state.trace_state.substack[-1]
@@ -781,8 +776,7 @@ def maybe_find_leaked_tracers(x: Optional[Union[MainTrace, Sublevel]]):
   by the user. In this case an empty list is returned.
   """
   traces = list(filter(lambda x: isinstance(x, Trace), gc.get_referrers(x)))
-  tracers = list(filter(lambda x: isinstance(x, Tracer), gc.get_referrers(*traces)))
-  return tracers
+  return list(filter(lambda x: isinstance(x, Tracer), gc.get_referrers(*traces)))
 
 @contextmanager
 def new_main(trace_type: Type[Trace],
@@ -859,10 +853,7 @@ def new_sublevel() -> Generator[None, None, None]:
         raise Exception(f'Leaked sublevel {t()}. Leaked tracer(s): {leaked_tracers}.')
 
 def full_lower(val):
-  if isinstance(val, Tracer):
-    return val.full_lower()
-  else:
-    return val
+  return val.full_lower() if isinstance(val, Tracer) else val
 
 def find_top_trace(xs, axis_names=None) -> Trace:
   top_main: Optional[MainTrace] = None
@@ -971,10 +962,7 @@ def concrete_aval(x):
 
 
 def get_aval(x):
-  if isinstance(x, Tracer):
-    return x.aval
-  else:
-    return concrete_aval(x)
+  return x.aval if isinstance(x, Tracer) else concrete_aval(x)
 
 
 pytype_aval_mappings: Dict[type, Callable[[Any], AbstractValue]] = {}
@@ -1011,13 +999,12 @@ def concrete_or_error(force: Any, val: Any, context=""):
   """Like force(val), but gives the context in the error message."""
   if force is None:
     force = lambda x: x
-  if isinstance(val, Tracer):
-    if isinstance(val.aval, ConcreteArray):
-      return force(val.aval.val)
-    else:
-      raise ConcretizationTypeError(val, context)
-  else:
+  if not isinstance(val, Tracer):
     return force(val)
+  if isinstance(val.aval, ConcreteArray):
+    return force(val.aval.val)
+  else:
+    raise ConcretizationTypeError(val, context)
 
 convert_element_type_p = Primitive('convert_element_type')
 
@@ -1070,13 +1057,12 @@ class UnshapedArray(AbstractValue):
                          self.weak_type)
 
   def join(self, other):
-    if self.dtype == other.dtype:
-      if self.weak_type == other.weak_type:
-        return self
-      else:
-        return UnshapedArray(self.dtype, weak_type=False)
-    else:
+    if self.dtype != other.dtype:
       raise TypeError(self, other)
+    if self.weak_type == other.weak_type:
+      return self
+    else:
+      return UnshapedArray(self.dtype, weak_type=False)
 
   def str_short(self, short_dtypes=False) -> str:
     return _short_dtype_name(self.dtype) if short_dtypes else self.dtype.name
@@ -1380,7 +1366,7 @@ def symbolic_equal_dim(d1: DimSize, d2: DimSize) -> bool:
 
 def symbolic_equal_one_of_dim(d1: DimSize, dlist: Sequence[DimSize]) -> bool:
   handler, ds = _dim_handler_and_canonical(d1, *dlist)
-  return any([handler.symbolic_equal(ds[0], d) for d in ds[1:]])
+  return any(handler.symbolic_equal(ds[0], d) for d in ds[1:])
 
 def symbolic_equal_shape(s1: Shape, s2: Shape) -> bool:
   return (len(s1) == len(s2) and
@@ -1416,7 +1402,7 @@ def divide_shape_sizes(s1: Shape, s2: Shape) -> DimSize:
   return handler.divide_shape_sizes(ds[:len(s1)], ds[len(s1):])
 
 def same_shape_sizes(s1: Shape, s2: Shape) -> bool:
-  return 1 == divide_shape_sizes(s1, s2)
+  return divide_shape_sizes(s1, s2) == 1
 
 def is_empty_shape(s: Shape) -> bool:
   return any(symbolic_equal_dim(d, 0) for d in s)
@@ -1563,9 +1549,7 @@ def join_named_shapes(*named_shapes):
 
 # TODO: Make canonicalize_shape return named shapes?
 def as_named_shape(shape) -> NamedShape:
-  if isinstance(shape, NamedShape):
-    return shape
-  return NamedShape(*shape)
+  return shape if isinstance(shape, NamedShape) else NamedShape(*shape)
 
 
 # ------------------- Call -------------------
@@ -1937,9 +1921,8 @@ def _check_jaxpr(jaxpr: Jaxpr, in_avals: Sequence[AbstractValue]):
   def read(v: Atom) -> AbstractValue:
     if isinstance(v, Literal):
       return raise_to_shaped(get_aval(v.val))
-    else:
-      typecheck_assert(v in env, f"Variable '{v}' not defined")
-      return env[v]
+    typecheck_assert(v in env, f"Variable '{v}' not defined")
+    return env[v]
 
   def write(v: Var, a: AbstractValue) -> None:
     typecheck_assert(v not in env, f"Variable '{v}' already bound")
@@ -2009,8 +1992,7 @@ def check_call(prim, in_avals, params):
 
   _check_jaxpr(call_jaxpr, in_avals)
 
-  out_avals = [v.aval for v in call_jaxpr.outvars]
-  return out_avals
+  return [v.aval for v in call_jaxpr.outvars]
 
 def check_map(prim, in_avals, params):
   typecheck_assert("call_jaxpr" in params,
@@ -2044,9 +2026,11 @@ def check_map(prim, in_avals, params):
     _check_jaxpr(call_jaxpr, mapped_avals)
 
   mapped_out_avals = [v.aval for v in call_jaxpr.outvars]
-  out_avals = [unmapped_aval(axis_size, axis_name, out_axis, aval) if out_axis is not None else aval
-               for aval, out_axis in zip(mapped_out_avals, out_axes)]
-  return out_avals
+  return [
+      unmapped_aval(axis_size, axis_name, out_axis, aval)
+      if out_axis is not None else aval
+      for aval, out_axis in zip(mapped_out_avals, out_axes)
+  ]
 
 
 # ------------------- Jaxpr printed representation -------------------

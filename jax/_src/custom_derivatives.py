@@ -71,10 +71,7 @@ def _zeros_like_pytree(x):
 
 @partial(partial, tree_map)
 def _stop_gradient(x):
-  if isinstance(x, core.Tracer):
-    return stop_gradient_p.bind(x)
-  else:
-    return x
+  return stop_gradient_p.bind(x) if isinstance(x, core.Tracer) else x
 
 
 ### JVPs
@@ -224,7 +221,7 @@ def _add_args(f, extra_args):
 
 @lu.transformation
 def _add_args_(extra_args, *args, **kwargs):
-  extra_args = tuple([arg.val for arg in extra_args])
+  extra_args = tuple(arg.val for arg in extra_args)
   all_args = (extra_args + args)
   yield (yield all_args, kwargs)
 

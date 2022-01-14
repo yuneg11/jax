@@ -225,13 +225,12 @@ def backends():
           # We always expect the CPU and interpreter backends to initialize
           # successfully.
           raise
-        else:
-          # If the backend isn't built into the binary, or if it has no devices,
-          # we expect a RuntimeError.
-          logging.info("Unable to initialize backend '%s': %s", platform,
-                       err)
-          _backends_errors[platform] = str(err)
-          continue
+        # If the backend isn't built into the binary, or if it has no devices,
+        # we expect a RuntimeError.
+        logging.info("Unable to initialize backend '%s': %s", platform,
+                     err)
+        _backends_errors[platform] = str(err)
+        continue
     if _default_backend.platform == "cpu" and FLAGS.jax_platform_name != 'cpu':
       logging.warning('No GPU/TPU found, falling back to CPU. '
                       '(Set TF_CPP_MIN_LOG_LEVEL=0 and rerun for more info.)')
@@ -268,16 +267,15 @@ def _get_backend_uncached(platform=None):
   bs = backends()
   platform = (platform or FLAGS.jax_xla_backend or FLAGS.jax_platform_name
               or None)
-  if platform is not None:
-    backend = bs.get(platform, None)
-    if backend is None:
-      if platform in _backends_errors:
-        raise RuntimeError(f"Backend '{platform}' failed to initialize: "
-                           f"{_backends_errors[platform]}")
-      raise RuntimeError(f"Unknown backend {platform}")
-    return backend
-  else:
+  if platform is None:
     return _default_backend
+  backend = bs.get(platform, None)
+  if backend is None:
+    if platform in _backends_errors:
+      raise RuntimeError(f"Backend '{platform}' failed to initialize: "
+                         f"{_backends_errors[platform]}")
+    raise RuntimeError(f"Unknown backend {platform}")
+  return backend
 
 
 @lru_cache(maxsize=None)  # don't use util.memoize because there is no X64 dependence.
@@ -287,9 +285,7 @@ def get_backend(platform=None):
 
 def get_device_backend(device=None):
   """Returns the Backend associated with `device`, or the default Backend."""
-  if device is not None:
-    return device.client
-  return get_backend()
+  return device.client if device is not None else get_backend()
 
 
 def device_count(backend: Optional[str] = None) -> int:

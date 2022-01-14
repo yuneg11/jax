@@ -750,10 +750,9 @@ def xla_computation(fun: Callable,
   def make_axis_env(nreps):
     if axis_env is None:
       return xla.AxisEnv(nreps, (), ())
-    else:
-      nreps = nreps * prod(size for name, size in axis_env)
-      names, sizes = unzip2(axis_env)
-      return xla.AxisEnv(nreps, names, sizes)
+    nreps = nreps * prod(size for name, size in axis_env)
+    names, sizes = unzip2(axis_env)
+    return xla.AxisEnv(nreps, names, sizes)
 
   @wraps(fun)
   @api_boundary
@@ -822,10 +821,7 @@ def xla_computation(fun: Callable,
                            "to get a ShapedArray, otherwise this "
                            "information is lost")
 
-    if return_shape:
-      return built, out_shape
-    else:
-      return built
+    return (built, out_shape) if return_shape else built
 
   return computation_maker
 
@@ -973,10 +969,7 @@ def value_and_grad(fun: Callable, argnums: Union[int, Sequence[int]] = 0,
     tree_map(partial(_check_output_dtype_grad, holomorphic), ans)
     g = vjp_py(np.ones((), dtype=dtype))
     g = g[0] if isinstance(argnums, int) else g
-    if not has_aux:
-      return ans, g
-    else:
-      return (ans, aux), g
+    return (ans, g) if not has_aux else ((ans, aux), g)
 
   return value_and_grad_f
 
@@ -987,11 +980,10 @@ def _check_scalar(x):
   except TypeError as e:
     raise TypeError(msg(f"was {x}")) from e
   else:
-    if isinstance(aval, ShapedArray):
-      if aval.shape != ():
-        raise TypeError(msg(f"had shape: {aval.shape}"))
-    else:
+    if not isinstance(aval, ShapedArray):
       raise TypeError(msg(f"had abstract value {aval}"))
+    if aval.shape != ():
+      raise TypeError(msg(f"had shape: {aval.shape}"))
 
 def _check_input_dtype_revderiv(name, holomorphic, allow_int, x):
   _check_arg(x)
@@ -1071,8 +1063,9 @@ def _check_input_dtype_jacfwd(holomorphic, x):
   _check_arg(x)
   aval = core.get_aval(x)
   if holomorphic:
-    if not (dtypes.issubdtype(aval.dtype, np.complexfloating) and
-            not dtypes.issubdtype(aval.dtype, np.floating)):
+    if not dtypes.issubdtype(aval.dtype,
+                             np.complexfloating) or dtypes.issubdtype(
+                                 aval.dtype, np.floating):
       raise TypeError("jacfwd with holomorphic=True requires inputs with complex dtype, "
                       f"but got {aval.dtype.name}.")
   elif not dtypes.issubdtype(aval.dtype, np.floating):
@@ -1084,10 +1077,9 @@ def _check_input_dtype_jacfwd(holomorphic, x):
 
 def _check_output_dtype_jacfwd(holomorphic, x):
   aval = core.get_aval(x)
-  if holomorphic:
-    if not dtypes.issubdtype(aval.dtype, np.complexfloating):
-      raise TypeError("jacfwd with holomorphic=True requires outputs with complex dtype, "
-                      f"but got {aval.dtype.name}.")
+  if holomorphic and not dtypes.issubdtype(aval.dtype, np.complexfloating):
+    raise TypeError("jacfwd with holomorphic=True requires outputs with complex dtype, "
+                    f"but got {aval.dtype.name}.")
 
 
 def jacrev(fun: Callable, argnums: Union[int, Sequence[int]] = 0,
@@ -1659,11 +1651,7 @@ def pmap(
   >>> print(f2(jnp.array([2., 3.])))  # doctest: +SKIP
   [ 13.  13.]
   """
-  if FLAGS.experimental_cpp_pmap:
-    func = _cpp_pmap
-  else:
-    func = _python_pmap
-
+  func = _cpp_pmap if FLAGS.experimental_cpp_pmap else _python_pmap
   return func(
       fun,
       axis_name,
@@ -1778,7 +1766,7 @@ def _shared_code_pmap(fun, axis_name, static_broadcasted_argnums,
   if not all(type(l) is int for l in tree_leaves(in_axes)):
     raise TypeError("pmap in_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {in_axes}.")
-  if not all(type(l) is int for l in tree_leaves(out_axes)):
+  if any(type(l) is not int for l in tree_leaves(out_axes)):
     raise TypeError("pmap out_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {out_axes}.")
 

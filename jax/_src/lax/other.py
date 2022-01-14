@@ -99,7 +99,7 @@ def conv_general_dilated_patches(
   rhs = jnp.tile(rhs, (n_channels,) + (1,) * (rhs.ndim - 1))
   rhs = jnp.moveaxis(rhs, (0, 1), (rhs_spec[0], rhs_spec[1]))
 
-  out = lax.conv_general_dilated(
+  return lax.conv_general_dilated(
       lhs=lhs,
       rhs=rhs,
       window_strides=window_strides,
@@ -112,4 +112,3 @@ def conv_general_dilated_patches(
       feature_group_count=n_channels,
       preferred_element_type=preferred_element_type
   )
-  return out

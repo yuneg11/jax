@@ -486,17 +486,15 @@ def _promote_shapes(fun_name, *args):
   """Prepend implicit leading singleton dimensions for Numpy broadcasting."""
   if len(args) < 2:
     return args
-  else:
-    shapes = [shape(arg) for arg in args]
-    nonscalar_ranks = [len(shp) for shp in shapes if shp]
-    if not nonscalar_ranks or len(set(nonscalar_ranks)) == 1:
-      return args
-    else:
-      if config.jax_numpy_rank_promotion != "allow":
-        _rank_promotion_warning_or_error(fun_name, shapes)
-      result_rank = len(lax.broadcast_shapes(*shapes))
-      return [broadcast_to(arg, (1,) * (result_rank - len(shp)) + shp)
-              for arg, shp in zip(args, shapes)]
+  shapes = [shape(arg) for arg in args]
+  nonscalar_ranks = [len(shp) for shp in shapes if shp]
+  if not nonscalar_ranks or len(set(nonscalar_ranks)) == 1:
+    return args
+  if config.jax_numpy_rank_promotion != "allow":
+    _rank_promotion_warning_or_error(fun_name, shapes)
+  result_rank = len(lax.broadcast_shapes(*shapes))
+  return [broadcast_to(arg, (1,) * (result_rank - len(shp)) + shp)
+          for arg, shp in zip(args, shapes)]
 
 def _rank_promotion_warning_or_error(fun_name, shapes):
   if config.jax_numpy_rank_promotion == "warn":
@@ -514,13 +512,11 @@ def _rank_promotion_warning_or_error(fun_name, shapes):
 
 def _promote_dtypes(*args):
   """Convenience function to apply Numpy argument dtype promotion."""
-  # TODO(dougalm,mattjj): This is a performance bottleneck. Consider memoizing.
   if len(args) < 2:
     return args
-  else:
-    to_dtype, weak_type = dtypes._lattice_result_type(*args)
-    to_dtype = dtypes.canonicalize_dtype(to_dtype)
-    return [lax._convert_element_type(x, to_dtype, weak_type) for x in args]
+  to_dtype, weak_type = dtypes._lattice_result_type(*args)
+  to_dtype = dtypes.canonicalize_dtype(to_dtype)
+  return [lax._convert_element_type(x, to_dtype, weak_type) for x in args]
 
 def _promote_dtypes_inexact(*args):
   """Convenience function to apply Numpy argument dtype promotion.
@@ -616,11 +612,6 @@ def _convert_and_clip_integer(val, dtype):
     raise TypeError("_convert_and_clip_integer only accepts integer dtypes.")
 
   val_dtype = dtypes.canonicalize_dtype(val.dtype)
-  if val_dtype != val.dtype:
-    # TODO(jakevdp): this is a weird corner case; need to figure out how to handle it.
-    # This happens in X32 mode and can either come from a jax value created in another
-    # context, or a Python integer converted to int64.
-    pass
   min_val = _constant_like(val, _max(iinfo(dtype).min, iinfo(val_dtype).min))
   max_val = _constant_like(val, _min(iinfo(dtype).max, iinfo(val_dtype).max))
   return clip(val, min_val, max_val).astype(dtype)

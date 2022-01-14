@@ -83,7 +83,7 @@ def dctn(x, type=2, s=None, axes=None, norm=None):
     return dct(x, n=s[0] if s is not None else None, axis=axes[0], norm=norm)
 
   if s is not None:
-    ns = {a: n for a, n in zip(axes, s)}
+    ns = dict(zip(axes, s))
     pads = [(0, ns[a] - x.shape[a] if a in ns else 0, 0) for a in range(x.ndim)]
     x = lax.pad(x, jnp.array(0, x.dtype), pads)
 

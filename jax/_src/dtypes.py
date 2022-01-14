@@ -122,9 +122,9 @@ def _scalar_type_to_dtype(typ: type, value: Any = None):
   OverflowError: Python int 9223372036854775808 too large to convert to int32
   """
   dtype = canonicalize_dtype(python_scalar_dtypes[typ])
-  if typ is int and value is not None:
-    if value < np.iinfo(dtype).min or value > np.iinfo(dtype).max:
-      raise OverflowError(f"Python int {value} too large to convert to {dtype}")
+  if (typ is int and value is not None
+      and (value < np.iinfo(dtype).min or value > np.iinfo(dtype).max)):
+    raise OverflowError(f"Python int {value} too large to convert to {dtype}")
   return dtype
 
 

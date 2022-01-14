@@ -91,10 +91,7 @@ def _eigh(a, b, lower, eigvals_only, eigvals, type):
   a = np_linalg._promote_arg_dtypes(jnp.asarray(a))
   v, w = lax_linalg.eigh(a, lower=lower)
 
-  if eigvals_only:
-    return w
-  else:
-    return w, v
+  return w if eigvals_only else (w, v)
 
 @_wraps(scipy.linalg.eigh)
 def eigh(a, b=None, lower=True, eigvals_only=False, overwrite_a=False,
@@ -140,10 +137,7 @@ def _lu(a, permute_l):
   k = min(m, n)
   l = jnp.tril(lu, -1)[:, :k] + jnp.eye(m, k, dtype=dtype)
   u = jnp.triu(lu)[:k, :]
-  if permute_l:
-    return jnp.matmul(p, l), u
-  else:
-    return p, l, u
+  return (jnp.matmul(p, l), u) if permute_l else (p, l, u)
 
 @_wraps(scipy.linalg.lu, update_doc=False)
 @partial(jit, static_argnames=('permute_l', 'overwrite_a', 'check_finite'))
@@ -207,11 +201,11 @@ def solve(a, b, sym_pos=False, lower=False, overwrite_a=False, overwrite_b=False
 
 @partial(jit, static_argnames=('trans', 'lower', 'unit_diagonal'))
 def _solve_triangular(a, b, trans, lower, unit_diagonal):
-  if trans == 0 or trans == "N":
+  if trans in [0, "N"]:
     transpose_a, conjugate_a = False, False
-  elif trans == 1 or trans == "T":
+  elif trans in [1, "T"]:
     transpose_a, conjugate_a = True, False
-  elif trans == 2 or trans == "C":
+  elif trans in [2, "C"]:
     transpose_a, conjugate_a = True, True
   else:
     raise ValueError("Invalid 'trans' value {}".format(trans))
@@ -226,10 +220,7 @@ def _solve_triangular(a, b, trans, lower, unit_diagonal):
                                     transpose_a=transpose_a,
                                     conjugate_a=conjugate_a,
                                     unit_diagonal=unit_diagonal)
-  if b_is_vector:
-    return out[..., 0]
-  else:
-    return out
+  return out[..., 0] if b_is_vector else out
 
 @_wraps(scipy.linalg.solve_triangular)
 def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
@@ -288,20 +279,20 @@ def _calc_P_Q(A):
     raise ValueError('expected A to be a square matrix')
   A_L1 = np_linalg.norm(A,1)
   n_squarings = 0
-  if A.dtype == 'float64' or A.dtype == 'complex128':
-   U3, V3 = _pade3(A)
-   U5, V5 = _pade5(A)
-   U7, V7 = _pade7(A)
-   U9, V9 = _pade9(A)
-   maxnorm = 5.371920351148152
-   n_squarings = jnp.maximum(0, jnp.floor(jnp.log2(A_L1 / maxnorm)))
-   A = A / 2**n_squarings
-   U13, V13 = _pade13(A)
-   conds = jnp.array([1.495585217958292e-002, 2.539398330063230e-001,
-                      9.504178996162932e-001, 2.097847961257068e+000])
-   U = jnp.select((A_L1 < conds), (U3, U5, U7, U9), U13)
-   V = jnp.select((A_L1 < conds), (V3, V5, V7, V9), V13)
-  elif A.dtype == 'float32' or A.dtype == 'complex64':
+  if A.dtype in ['float64', 'complex128']:
+    U3, V3 = _pade3(A)
+    U5, V5 = _pade5(A)
+    U7, V7 = _pade7(A)
+    U9, V9 = _pade9(A)
+    maxnorm = 5.371920351148152
+    n_squarings = jnp.maximum(0, jnp.floor(jnp.log2(A_L1 / maxnorm)))
+    A = A / 2**n_squarings
+    U13, V13 = _pade13(A)
+    conds = jnp.array([1.495585217958292e-002, 2.539398330063230e-001,
+                       9.504178996162932e-001, 2.097847961257068e+000])
+    U = jnp.select((A_L1 < conds), (U3, U5, U7, U9), U13)
+    V = jnp.select((A_L1 < conds), (V3, V5, V7, V9), V13)
+  elif A.dtype in ['float32', 'complex64']:
     U3,V3 = _pade3(A)
     U5,V5 = _pade5(A)
     maxnorm = 3.925724783138660
@@ -318,10 +309,7 @@ def _calc_P_Q(A):
   return P, Q, n_squarings
 
 def _solve_P_Q(P, Q, upper_triangular=False):
-  if upper_triangular:
-    return solve_triangular(Q, P)
-  else:
-    return np_linalg.solve(Q, P)
+  return solve_triangular(Q, P) if upper_triangular else np_linalg.solve(Q, P)
 
 def _precise_dot(A, B):
   return jnp.dot(A, B, precision=lax.Precision.HIGHEST)
@@ -412,15 +400,11 @@ def expm_frechet(A, E, *, method=None, compute_expm=True):
     raise ValueError('expected A and E to be the same shape')
   if method is None:
     method = 'SPS'
-  if method == 'SPS':
-    bound_fun = partial(expm, upper_triangular=False, max_squarings=16)
-    expm_A, expm_frechet_AE = jvp(bound_fun, (A,), (E,))
-  else:
+  if method != 'SPS':
     raise ValueError('only method=\'SPS\' is supported')
-  if compute_expm:
-    return expm_A, expm_frechet_AE
-  else:
-    return expm_frechet_AE
+  bound_fun = partial(expm, upper_triangular=False, max_squarings=16)
+  expm_A, expm_frechet_AE = jvp(bound_fun, (A,), (E,))
+  return (expm_A, expm_frechet_AE) if compute_expm else expm_frechet_AE
 
 
 @_wraps(scipy.linalg.block_diag)

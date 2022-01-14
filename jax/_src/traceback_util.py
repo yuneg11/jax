@@ -68,7 +68,7 @@ def filter_traceback(tb):
   for f, lineno in reversed(frames):
     if include_frame(f):
       out = types.TracebackType(out, f, f.f_lasti, lineno)  # pytype: disable=wrong-arg-count
-  if out is None and len(frames) > 0:
+  if out is None and frames:
     f, lineno = frames[-1]
     out = types.TracebackType(out, f, f.f_lasti, lineno)
   return out

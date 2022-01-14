@@ -77,11 +77,10 @@ def _update_dim_sizes(
       raise ValueError(
           'input with shape %r does not have enough dimensions for all core '
           'dimensions %r %s' % (shape, core_dims, error_context))
-  else:
-    if len(shape) != num_core_dims:
-      raise ValueError(
-          'output shape %r does not match core dimensions %r %s'
-          % (shape, core_dims, error_context))
+  elif len(shape) != num_core_dims:
+    raise ValueError(
+        'output shape %r does not match core dimensions %r %s'
+        % (shape, core_dims, error_context))
 
   core_shape = shape[-num_core_dims:] if core_dims else ()
   for dim, size in zip(core_dims, core_shape):
